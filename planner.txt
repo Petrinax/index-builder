@@ -1,0 +1,111 @@
+Ingestion
+
+1 x a day
+
+-> get market daily data
+
+Index builder
+
+
+start_date, end_date
+default: today
+
+    select top 100 stocks.
+    assign equal weights - notional weight
+
+
+Definitions used:
+
+Equal notional weight:
+
+"""
+Equal notional weight means that each asset (like each stock in your index)
+contributes the same dollar value (notional exposure) to the total portfolio
+— regardless of the stock’s price or market capitalization.
+
+e.g.
+Suppose you’re building an Equal Notional Weighted Index of 4 stocks:
+
+| Stock | Price | Desired Notional per Stock | Number of Shares |
+| ----- | ----- | -------------------------- | ---------------- |
+| AAPL  | $200  | $10,000                    | 50 shares        |
+| MSFT  | $400  | $10,000                    | 25 shares        |
+| GOOG  | $100  | $10,000                    | 100 shares       |
+| AMZN  | $50   | $10,000                    | 200 shares       |
+
+
+Each stock contributes $10,000 of value (notional) to the index,
+even though their prices and number of shares differ.
+
+
+"""
+
+Follow Up Questions:
+
+What should be the portfolio value? (to determine notional value per stock)
+
+is fractional shareholding possible? (to invest exactly same amount in each stock )
+OR are we rounding off the amount to match whole share quantities.
+
+How are we defining top 100 US stocks? is it from a particular exchange NYSE/Nasdaq or some custom list?
+in other words: whats the scope of eligible stocks?
+
+
+What is re-balancing logic?
+
+Should the system track residual cash after rebalancing due to rounding differences?
+
+How is the index value computed — as a ratio to initial base value (like base = 1000 points)?
+
+*** What happens to rounding losses and gains? ***
+
+
+## how notional weights are assigned and rebalanced?
+
+
+reconstitution (i.e., changing the set of eligible stocks) vs. rebalancing (adjusting weights among current constituents)
+
+
+
+
+
+
+---
+
+
+
+Future Scopes:
+
+support multiple custom indices (Equal Weight 100, Equal Weight Tech 50, etc)
+support different strategies with Other Weighting Methods. (Market Cap Weighted, Equal Share Weighted, etc)
+support multiple data providers
+
+Improve change tracking. instead of { date: portfolio }. takes space.
+
+Use warehouse . not DB.
+
+Rate Limit web service.
+
+health check endpoint.
+add workers for api.
+Async requests
+
+Use multi-stage Docker builds for smaller images. (explore
+
+Avoid storing large files in DB; use GCS buckets (Data lakes . hudi iceberg etc. ) for reports if needed.
+
+Prometheus + Grafana (if on GKE) or Cloud Monitoring
+Monitoring alerts for failures
+
+
+
+
+
+
+
+
+
+
+
+
+
