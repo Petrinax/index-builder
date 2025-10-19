@@ -36,16 +36,17 @@ Pros:
 
 Cons:
 - Free plan only for US stocks. Not international
+- Batch calls in Free tier not available
 
 ### yfinance
 
 Pros:
 - Completely free. No restrictions
 - international stocks data available
--
+- Batch processing in Free tier
 
 Cons:
-- Market Cap Data not reliable
+- Market Cap Data not reliable (Alt. calculate at runtime (outstanding*price))
 
 
 

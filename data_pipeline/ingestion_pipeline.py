@@ -2,11 +2,12 @@ import os
 from datetime import datetime
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
-from database import DatabaseFactory, DatabaseConnection
-from client import ClientFactory, StockDataClient
+import pandas as pd
+from .database import DatabaseFactory, DatabaseConnection
+from .client import ClientFactory, StockDataClient
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from base_logging import Logger
+from .base_logging import Logger
 
 load_dotenv()
 
@@ -16,7 +17,7 @@ logger = Logger(__name__)
 # Configuration
 DATA_PROVIDER = os.getenv('DATA_PROVIDER', 'yfinance')  # Default provider
 DB_TYPE = os.getenv('DB_TYPE', 'sqlite')  # Default to sqlite
-DB_PATH = f'stock_data.{DB_TYPE}' if DB_TYPE == 'duckdb' else 'stock_data.db'
+DB_PATH = os.getenv('DB_PATH', 'stock_data.db')
 MAX_WORKERS = int(os.getenv('MAX_WORKERS', '15'))  # Number of parallel workers for metadata updates
 
 EXCHANGE_MIC_CODES = {
@@ -35,7 +36,7 @@ class StockDataIngestion:
 
         self.db_type = db_type or DB_TYPE
         self.db_path = db_path or DB_PATH
-        self.db_conn: DatabaseConnection = DatabaseFactory.create(self.db_type, self.db_path)
+        self.db_client: DatabaseConnection = DatabaseFactory.create(self.db_type, self.db_path)
         logger.info(f"Using {self.db_type.upper()} database: {self.db_path}")
 
 
@@ -158,10 +159,10 @@ class StockDataIngestion:
                         shares_outstanding = EXCLUDED.shares_outstanding,
                         last_updated = EXCLUDED.last_updated
                 """
-                self.db_conn.execute(sql, params)
+                self.db_client.execute(sql, params)
 
                 # # Commit all changes at once
-                # self.db_conn.execute("COMMIT")
+                # self.db_client.execute("COMMIT")
                 db_elapsed = (datetime.now() - db_start).total_seconds()
                 logger.info(f"Successfully updated {len(bulk_data)} stocks in database in {db_elapsed:.2f} seconds")
             except Exception as e:
@@ -174,33 +175,25 @@ class StockDataIngestion:
         logger.info(f"Total: {total_stocks} | Successful: {successful} | Failed: {failed}")
         logger.info(f"Average rate: {total_stocks/elapsed:.1f} stocks/sec")
 
-    def _get_stocks_metadata(self, exchange: str) -> List[Dict]:
+    def _get_stocks_metadata(self, exchange: str) -> pd.DataFrame:
         """Fetch stock metadata for a specific exchange"""
         try:
-            result = self.db_conn.execute(
-                "SELECT symbol, name, exchange, mic, currency, type FROM valid_stocks WHERE exchange = ?",
-                [exchange]
-            ).fetchall()
-            stocks = []
-            for row in result:
-                stocks.append({
-                    'symbol': row[0],
-                    'name': row[1],
-                    'exchange': row[2],
-                    'mic': row[3],
-                    'currency': row[4],
-                    'type': row[5]
-                })
-            logger.info(f"Fetched {len(stocks)} stocks from metadata for {exchange}")
-            return stocks
+            df_meta = pd.read_sql(
+                sql="""
+                    SELECT symbol, name, exchange, mic, currency, type, shares_outstanding 
+                    FROM stock_metadata 
+                    WHERE exchange = ? AND shares_outstanding IS NOT NULL
+                """, params= [exchange], con=self.db_client.conn
+            )
+            return df_meta
         except Exception as e:
             logger.error(f"Error fetching stock metadata for {exchange}: {e}")
-            return []
+            raise e
 
     def _get_shares_outstanding(self, symbol: str, exchange: str) -> Optional[float]:
         """Get shares outstanding from stock_metadata table"""
         try:
-            result = self.db_conn.execute(
+            result = self.db_client.execute(
                 "SELECT shares_outstanding FROM valid_stocks WHERE symbol = ? AND exchange = ?",
                 [symbol, exchange]
             ).fetchone()
@@ -220,7 +213,7 @@ class StockDataIngestion:
         - Compatibility / notes: this syntax is supported by SQLite (3.24+) and PostgreSQL; ensure the unique constraint or primary key exists for the conflict columns. The `?` placeholders follow the DB-API parameter binding.
 
         """
-        self.db_conn.execute('''
+        self.db_client.execute('''
             INSERT INTO daily_stock_prices (symbol, date, open, high, low, close, volume, exchange, mic)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (symbol, date, exchange) DO UPDATE SET
@@ -241,7 +234,7 @@ class StockDataIngestion:
         - Compatibility / notes: this syntax is supported by SQLite (3.24+) and PostgreSQL; ensure the unique constraint or primary key exists for the conflict columns. The `?` placeholders follow the DB-API parameter binding.
 
         """
-        self.db_conn.execute('''
+        self.db_client.execute('''
             INSERT INTO daily_market_cap (symbol, date, market_cap, shares_outstanding, exchange, mic)
             VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT (symbol, date, exchange) DO UPDATE SET
@@ -249,8 +242,8 @@ class StockDataIngestion:
         ''', [symbol, date, market_cap, shares, exchange, mic])
 
     def close(self):
-        if self.db_conn:
-            self.db_conn.close()
+        if self.db_client:
+            self.db_client.close()
             logger.info("Database connection closed")
 
 
@@ -258,16 +251,16 @@ class StockDataIngestion:
 
     def _create_ingestion_log(self, exchange: str, target_date: str, started_at: datetime) -> int:
         """Create a new ingestion log entry and return its ID."""
-        self.db_conn.execute(
+        self.db_client.execute(
             "INSERT INTO ingestion_log (exchange, date, started_at, status) VALUES (?, ?, ?, 'RUNNING')",
             [exchange, target_date, started_at]
         )
-        return self.db_conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        return self.db_client.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     def _update_ingestion_log_success(self, log_id: int, processed: int,
                                       successful: int, failed: int, exchange: str):
         """Update ingestion log with success status."""
-        self.db_conn.execute('''
+        self.db_client.execute('''
             UPDATE ingestion_log SET stocks_processed = ?, stocks_successful = ?, 
             stocks_failed = ?, completed_at = ?, status = 'COMPLETED' WHERE id = ?
         ''', [processed, successful, failed, datetime.now(), log_id])
@@ -276,7 +269,7 @@ class StockDataIngestion:
 
     def _update_ingestion_log_failure(self, log_id: int, error_message: str):
         """Update ingestion log with failure status."""
-        self.db_conn.execute(
+        self.db_client.execute(
             "UPDATE ingestion_log SET status = 'FAILED', completed_at = ?, error_message = ? WHERE id = ?",
             [datetime.now(), str(error_message), log_id]
         )
@@ -292,35 +285,57 @@ class StockDataIngestion:
             logger.error(f"Error fetching stocks: {e}")
             return []
 
-    def _process_stocks_batch(self, stocks: List[Dict], target_date: Optional[str], period: Optional[str] ,exchange: str) -> tuple:
+    def _process_stocks_batch(self, stocks: pd.DataFrame, target_date: Optional[str], period: Optional[str] ,exchange: str) -> tuple:
         """
         Process a batch of stocks and return processing statistics.
         Returns: (processed_count, successful_count, failed_count)
         """
         processed = successful = failed = 0
         total_stocks = len(stocks)
-        requested_symbols = [stock['symbol'] for stock in stocks]
+        requested_symbols = stocks['symbol'].to_list()
 
-        for stock in stocks:
-            processed += 1
+        quotes = self.client.get_batch_quote(requested_symbols, target_date=target_date, period=period)
 
-            quotes = self.client.get_batch_quote(requested_symbols, target_date=target_date, period=period)
+        # Use upsert approach instead of append to handle conflicts
+        if not quotes.empty:
+            # Write to temporary table first
+            temp_table = "temp_daily_stock_prices"
+            quotes.to_sql(temp_table, self.db_client.conn, if_exists="replace", index=False)
 
-            quotes.to_sql("daily_stock_prices", self.db_conn.conn, if_exists="append", index=False)
+            # Perform upsert from temp table to main table
+            upsert_sql = f"""
+                INSERT INTO daily_stock_prices (symbol, exchange, mic, open, high, low, close, volume, date, last_updated)
+                SELECT symbol, exchange, mic, open, high, low, close, volume, date, last_updated
+                FROM {temp_table}
+                ON CONFLICT (symbol, exchange, date) DO UPDATE SET
+                    open = EXCLUDED.open,
+                    high = EXCLUDED.high,
+                    low = EXCLUDED.low,
+                    close = EXCLUDED.close,
+                    volume = EXCLUDED.volume,
+                    mic = EXCLUDED.mic,
+                    last_updated = EXCLUDED.last_updated
+            """
+            self.db_client.execute(upsert_sql)
+            
+            # Drop temporary table
+            self.db_client.execute(f"DROP TABLE IF EXISTS {temp_table}")
+            
+            logger.info(f"Successfully upserted {len(quotes)} price records")
 
-            fetched_symbols = set(quotes["symbol"].unique())
+        fetched_symbols = set(quotes["symbol"].unique())
 
-            # Compute counts
-            success_count = len(fetched_symbols)
-            failed_symbols = set(requested_symbols) - fetched_symbols
-            failed_count = len(failed_symbols)
+        # Compute counts
+        success_count = len(fetched_symbols)
+        failed_symbols = set(requested_symbols) - fetched_symbols
+        failed_count = len(failed_symbols)
 
-            print(f"✅ Successfully fetched: {success_count}")
-            print(f"❌ Failed to fetch: {failed_count}")
-            print(f"Failed symbols: {sorted(failed_symbols)}")
+        logger.info(f"✅ Successfully fetched: {success_count}")
+        logger.info(f"❌ Failed to fetch: {failed_count}")
+        if failed_symbols:
+            logger.info(f"Failed symbols: {sorted(failed_symbols)}")
 
-
-        return processed, successful, failed
+        return processed, successful, failed, quotes
 
     def _process_single_stock(self, stock: Dict, target_date: str, exchange: str) -> bool:
         """
@@ -370,14 +385,50 @@ class StockDataIngestion:
             # log_id = self._create_ingestion_log(exchange, target_date, started_at)
 
             # Get and filter stocks
-            exchange_stocks = self._get_stocks_metadata(exchange)
-            if not exchange_stocks:
+            df_stocks_meta = self._get_stocks_metadata(exchange)
+            if df_stocks_meta.empty:
                 return
 
             # Process all stocks (using stored shares_outstanding from metadata)
-            processed, successful, failed = self._process_stocks_batch(
-                exchange_stocks, target_date, period, exchange
+            processed, successful, failed, df_quotes = self._process_stocks_batch(
+                df_stocks_meta, target_date, period, exchange
             )
+
+            # Calculate Market Cap for all successfully processed stocks
+            if not df_quotes.empty:
+                df_joined = pd.merge(
+                    df_quotes[["symbol", "exchange", "mic", "close", "date"]],
+                    df_stocks_meta[["symbol", "exchange", "shares_outstanding"]],
+                    on=["symbol", "exchange"],
+                    how="inner"
+                )
+                
+                # Calculate market cap: shares_outstanding * close price
+                df_joined['market_cap'] = df_joined['shares_outstanding'] * df_joined['close']
+                df_joined['last_updated'] = datetime.now()
+                
+                df_market_cap = df_joined[[
+                    "symbol", "exchange", "mic", "market_cap", "shares_outstanding", "date", "last_updated"
+                ]]
+                
+                # Use upsert approach for market cap as well
+                temp_table = "temp_daily_market_cap"
+                df_market_cap.to_sql(temp_table, self.db_client.conn, if_exists="replace", index=False)
+                
+                upsert_sql = f"""
+                    INSERT INTO daily_market_cap (symbol, exchange, mic, market_cap, shares_outstanding, date, last_updated)
+                    SELECT symbol, exchange, mic, market_cap, shares_outstanding, date, last_updated
+                    FROM {temp_table}
+                    ON CONFLICT (symbol, exchange, date) DO UPDATE SET
+                        market_cap = EXCLUDED.market_cap,
+                        shares_outstanding = EXCLUDED.shares_outstanding,
+                        mic = EXCLUDED.mic,
+                        last_updated = EXCLUDED.last_updated
+                """
+                self.db_client.execute(upsert_sql)
+                self.db_client.execute(f"DROP TABLE IF EXISTS {temp_table}")
+                
+                logger.info(f"Successfully upserted {len(df_market_cap)} market cap records")
 
             # Update log with success
             # self._update_ingestion_log_success(log_id, processed, successful, failed, exchange)
@@ -443,7 +494,7 @@ class StockDataIngestion:
     def _print_summary(self, date: str = None):
         date = date or datetime.now().strftime('%Y-%m-%d')
         try:
-            result = self.db_conn.execute('''
+            result = self.db_client.execute('''
                 SELECT exchange, COUNT(DISTINCT symbol) as stock_count
                 FROM daily_stock_prices WHERE date = ? GROUP BY exchange ORDER BY exchange
             ''', [date]).fetchall()
@@ -456,20 +507,41 @@ class StockDataIngestion:
             logger.warning(f"Could not generate summary: {e}")
 
 
-
 def main():
-    try:
-        ingestion = StockDataIngestion('sqlite')  # Uses defaults from env vars
+    """
+    Python script with args to specify run_daily_snapshot or run_stock_metadata_update, with all params.
 
-        # ingestion.run_stock_metadata_update()
+    Usage:
+        python data_pipeline/ingestion_pipeline.py run_daily_snapshot --exchange NYSE --date 2024-10-17
+        python data_pipeline/ingestion_pipeline.py run_daily_snapshot --exchange NYSE --period 1d
+        python data_pipeline/ingestion_pipeline.py run_stock_metadata_update --exchange NYSE
 
-        ingestion.run_daily_snapshot(period='1mo')
+    """
+    import argparse
 
-        ingestion.close()
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        raise
+    parser = argparse.ArgumentParser(description="Stock Data Ingestion Pipeline")
+    subparsers = parser.add_subparsers(dest='command', required=True)
 
+    # Subparser for daily snapshot
+    snapshot_parser = subparsers.add_parser('run_daily_snapshot', help='Run daily stock data snapshot ingestion')
+    snapshot_parser.add_argument('--exchange', type=str, default='NYSE', help='Exchange to process (default: NYSE)')
+    snapshot_parser.add_argument('--date', type=str, help='Target date for snapshot (YYYY-MM-DD)')
+    snapshot_parser.add_argument('--period', type=str, help='Period for snapshot (e.g., 1d, 5d)')
+
+    # Subparser for metadata update
+    metadata_parser = subparsers.add_parser('run_stock_metadata_update', help='Update stock metadata including shares outstanding')
+    metadata_parser.add_argument('--exchange', type=str, default='NYSE', help='Exchange to update (default: NYSE)')
+
+    args = parser.parse_args()
+
+    ingestion = StockDataIngestion()
+
+    if args.command == 'run_daily_snapshot':
+        ingestion.run_daily_snapshot(exchange=args.exchange, target_date=args.date, period=args.period)
+    elif args.command == 'run_stock_metadata_update':
+        ingestion.run_stock_metadata_update(exchange=args.exchange)
+
+    ingestion.close()
 
 if __name__ == "__main__":
     main()

@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 import pandas as pd
 
-from base_logging import Logger
+from .base_logging import Logger
 
 load_dotenv()
 logger = Logger(__name__)

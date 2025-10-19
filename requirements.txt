@@ -2,7 +2,6 @@ finnhub-python
 pandas
 duckdb
 python-dotenv
-schedule==1.2.2
-requests==2.32.5
-numpy==2.3.4
+requests
+yfinance
 

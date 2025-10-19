@@ -1,0 +1,32 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install cron and system dependencies
+RUN apt-get update && apt-get install -y \
+    cron \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the application code
+COPY data_pipeline/ ./data_pipeline/
+COPY .env* ./
+
+# Create directories for logs and data
+RUN mkdir -p logs data csv_exports
+
+# Make scripts executable
+RUN chmod +x /app/data_pipeline/docker-entrypoint.sh
+RUN chmod +x /app/data_pipeline/ingestion_pipeline.py
+
+# Set Python path
+ENV PYTHONPATH=/app
+
+# Use entrypoint script
+ENTRYPOINT ["/app/data_pipeline/docker-entrypoint.sh"]
+
