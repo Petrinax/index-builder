@@ -9,6 +9,7 @@ from typing import Any, List, Tuple
 
 class DatabaseConnection(ABC):
     """Abstract base class for database connections"""
+    conn: Any
 
     @abstractmethod
     def connect(self, db_path: str):

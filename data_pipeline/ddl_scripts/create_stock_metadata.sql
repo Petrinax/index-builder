@@ -1,4 +1,3 @@
-
 CREATE TABLE IF NOT EXISTS stock_metadata (
     symbol VARCHAR,
     exchange VARCHAR,
@@ -6,6 +5,7 @@ CREATE TABLE IF NOT EXISTS stock_metadata (
     name VARCHAR,
     currency VARCHAR,
     type VARCHAR,
+    shares_outstanding FLOAT,
     last_updated TIMESTAMP,
     is_active BOOLEAN DEFAULT TRUE,
     PRIMARY KEY (symbol, exchange)

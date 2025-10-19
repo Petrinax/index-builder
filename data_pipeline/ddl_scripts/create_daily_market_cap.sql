@@ -2,7 +2,10 @@
 CREATE TABLE IF NOT EXISTS daily_market_cap (
     symbol VARCHAR,
     exchange VARCHAR,
-    market_cap BIGINT,
+    mic VARCHAR,
+
+    market_cap DOUBLE,
+    shares_outstanding DOUBLE
     date DATE,
     last_updated TIMESTAMP,
     PRIMARY KEY (symbol, exchange, date)

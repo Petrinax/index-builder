@@ -7,10 +7,12 @@ financial data providers (Finnhub, Alpha Vantage, IEX Cloud, etc.).
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, Any, Literal
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 import os
 from dotenv import load_dotenv
+
+import pandas as pd
 
 from base_logging import Logger
 
@@ -88,6 +90,10 @@ class StockDataClient(ABC):
                 'sector': str
             }
         """
+        pass
+
+    @abstractmethod
+    def get_batch_quote(self, symbols: List[str], target_date, period) -> pd.DataFrame:
         pass
 
     def _apply_rate_limit(self):
@@ -185,6 +191,8 @@ class FinnhubClient(StockDataClient):
         except Exception as e:
             logger.warning(f"Error fetching quote for {symbol}: {e}")
             return None
+    def get_batch_quote(self, symbols: List[str], target_date, period) -> pd.DataFrame:
+        raise NotImplementedError("Batch quote fetching not available for FinnhubClient")
 
     def get_company_profile(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Fetch company profile from Finnhub"""
@@ -234,15 +242,28 @@ class YFinanceClient(StockDataClient):
         Alternate: Fetches NYSE symbols from NASDAQ Trader website.
         """
 
-        if exchange == 'US':
+        if exchange in ['US', 'NYSE']:
             import pandas as pd
 
             url = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
             df = pd.read_csv(url, sep="|")
             nyse_df = df[df["Exchange"] == "N"]
-            nyse_tickers = nyse_df["ACT Symbol"].dropna().tolist()
 
-            return nyse_tickers
+            # Rename columns to match our standard format and add constants
+            nyse_df = nyse_df.rename(columns={
+                'ACT Symbol': 'symbol',
+                'Security Name': 'name'
+            })
+            nyse_df['exchange'] = 'NYSE'
+            nyse_df['mic'] = 'XNYS'
+            nyse_df['currency'] = 'USD'
+            nyse_df['type'] = 'Common Stock'
+
+            # Convert to list of dicts with only the columns we need
+            normalized = nyse_df[['symbol', 'name', 'exchange', 'mic', 'currency', 'type']].to_dict('records')
+
+            logger.info(f"Fetched {len(normalized)} symbols from NASDAQ Trader for NYSE")
+            return normalized
         else:
             logger.warning("YFinance doesn't provide symbol listing. Use Finnhub or maintain a static list.")
             return []
@@ -279,6 +300,100 @@ class YFinanceClient(StockDataClient):
         except Exception as e:
             logger.warning(f"Error fetching quote for {symbol}: {e}")
             return None
+
+    def get_batch_quote(self, symbols: List[str], target_date, period) -> pd.DataFrame:
+        """
+        Fetch batch quotes for multiple symbols in batches of 500.
+
+        Args:
+            symbols: List of stock symbols to fetch
+            target_date: Target date for the quotes (not used for yfinance, uses latest)
+
+        Returns:
+            DataFrame with combined results from all batches
+        """
+        batch_size = 500
+        all_results = []
+        query_params: Dict[Any, Any] = {
+            'interval': '1d',
+            'group_by': 'ticker',
+            'threads': True,
+            'auto_adjust': True
+        }
+        if target_date:
+            query_params['start'] = datetime.strptime(target_date, '%Y-%m-%d')
+            query_params['end'] = query_params['start'] + timedelta(days=1)
+        else:
+            query_params['period'] = period or '1d'
+
+        # Define database columns to keep
+        db_columns = ['symbol', 'exchange', 'mic', 'open', 'high', 'low', 'close', 'volume', 'date', 'last_updated']
+
+        # Split symbols into batches of 500
+        for i in range(0, len(symbols), batch_size):
+            time.sleep(3) # To respect rate limits
+            batch = symbols[i:i + batch_size]
+            logger.info(f"Fetching batch {i//batch_size + 1} of {(len(symbols)-1)//batch_size + 1} ({len(batch)} symbols)")
+
+            try:
+                data = self.yf.download(tickers=batch, **query_params)
+
+                if data.empty:
+                    logger.warning(f"No data returned for batch {i//batch_size + 1}")
+                    continue
+
+                # Handle single symbol vs multiple symbols differently
+                if len(batch) == 1:
+                    # For single symbol, data structure is different
+                    flat_df = data.copy()
+                    flat_df['symbol'] = batch[0]
+                    flat_df.reset_index(inplace=True)
+                    flat_df.rename(columns={'Date': 'date'}, inplace=True)
+                else:
+                    # For multiple symbols, use stack
+                    flat_df = (
+                        data.stack(level=0, future_stack=True)
+                        .rename_axis(index=["date", "symbol"])
+                        .reset_index()
+                    )
+
+                flat_df['exchange'] = 'NYSE'
+                flat_df['mic'] = 'XNYS'
+                flat_df['last_updated'] = datetime.now()
+                flat_df.rename(columns={
+                    'Open': 'open',
+                    'High': 'high',
+                    'Low': 'low',
+                    'Close': 'close',
+                    'Volume': 'volume'
+                }, inplace=True)
+
+                # Convert date column to '%Y-%m-%d' format
+                if 'date' in flat_df.columns:
+                    flat_df['date'] = pd.to_datetime(flat_df['date']).dt.strftime('%Y-%m-%d')
+
+                # Keep only database columns, drop any extra columns from yfinance
+                available_columns = [col for col in db_columns if col in flat_df.columns]
+                flat_df = flat_df[available_columns]
+
+                all_results.append(flat_df)
+                logger.info(f"Successfully fetched {len(flat_df)} records for batch {i//batch_size + 1}")
+
+            except Exception as e:
+                logger.error(f"Error fetching batch {i//batch_size + 1}: {e}")
+                continue
+
+        # Combine all batch results
+        if not all_results:
+            logger.warning("No data retrieved from any batch")
+            return pd.DataFrame()
+
+        combined_df = pd.concat(all_results, ignore_index=True)
+        logger.info(f"Total records fetched: {len(combined_df)} across {len(all_results)} batches")
+
+        return combined_df
+
+
 
     def get_company_profile(self, symbol: str) -> Optional[Dict[str, Any]]:
         """

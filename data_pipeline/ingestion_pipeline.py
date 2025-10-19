@@ -1,10 +1,10 @@
 import os
-import time
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 from dotenv import load_dotenv
 from database import DatabaseFactory, DatabaseConnection
 from client import ClientFactory, StockDataClient
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from base_logging import Logger
 
@@ -17,6 +17,7 @@ logger = Logger(__name__)
 DATA_PROVIDER = os.getenv('DATA_PROVIDER', 'yfinance')  # Default provider
 DB_TYPE = os.getenv('DB_TYPE', 'sqlite')  # Default to sqlite
 DB_PATH = f'stock_data.{DB_TYPE}' if DB_TYPE == 'duckdb' else 'stock_data.db'
+MAX_WORKERS = int(os.getenv('MAX_WORKERS', '15'))  # Number of parallel workers for metadata updates
 
 EXCHANGE_MIC_CODES = {
     'NYSE': ['XNYS'],
@@ -40,17 +41,173 @@ class StockDataIngestion:
 
     # DB Tasks
 
+    def _fetch_and_update_single_stock_metadata(self, stock: Dict) -> Dict[str, any]:
+        """
+        Fetch company profile and prepare metadata for a single stock.
+        This function is designed to be called in parallel.
+
+        Returns:
+            Dict with 'success', 'symbol', 'data', and 'error' keys
+        """
+        symbol = stock['symbol']
+        try:
+            # Fetch company profile to get shares_outstanding
+            profile = self.client.get_company_profile(symbol)
+            shares = profile.get('shares_outstanding') if profile else None
+
+            return {
+                'success': True,
+                'symbol': symbol,
+                'data': {
+                    'symbol': symbol,
+                    'name': stock['name'],
+                    'exchange': stock['exchange'],
+                    'mic': stock['mic'],
+                    'currency': stock.get('currency', 'USD'),
+                    'type': stock.get('type', 'Common Stock'),
+                    'shares': shares,
+                    'timestamp': datetime.now()
+                },
+                'error': None
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'symbol': symbol,
+                'data': None,
+                'error': str(e)
+            }
+
     def _update_stock_metadata(self, stocks: List[Dict]):
-        for stock in stocks:
+        """
+        Update stock metadata including shares outstanding with bulk operations.
+        Includes detailed progress logging.
+        """
+        total_stocks = len(stocks)
+        logger.info(f"Starting metadata update for {total_stocks} stocks")
+
+        successful = 0
+        failed = 0
+        processed = 0
+
+        # List to accumulate all successful data for bulk insert
+        bulk_data = []
+
+        # Track timing
+        start_time = datetime.now()
+        last_log_time = start_time
+
+        # Fetch all profiles first
+        logger.info("Fetching company profiles...")
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            future_to_stock = {executor.submit(self._fetch_and_update_single_stock_metadata, stock): stock for stock in stocks}
+            for future in as_completed(future_to_stock):
+                processed += 1
+                result = future.result()
+
+                if result['success']:
+                    successful += 1
+                    bulk_data.append(result['data'])
+                else:
+                    failed += 1
+                    logger.error(f"Error fetching metadata for {result['symbol']}: {result['error']}")
+
+                # Log progress every 100 stocks or every 5 seconds
+                current_time = datetime.now()
+                if processed % 100 == 0 or (current_time - last_log_time).seconds >= 5:
+                    elapsed = (current_time - start_time).total_seconds()
+                    rate = processed / elapsed if elapsed > 0 else 0
+                    eta_seconds = (total_stocks - processed) / rate if rate > 0 else 0
+
+                    logger.info(
+                        f"Fetching Progress: {processed}/{total_stocks} ({processed*100/total_stocks:.1f}%) | "
+                        f"Success: {successful} | Failed: {failed} | "
+                        f"Rate: {rate:.1f} stocks/sec | ETA: {eta_seconds/60:.1f} min"
+                    )
+                    last_log_time = current_time
+
+        # Bulk insert/update all successful stocks
+        if bulk_data:
+            logger.info(f"Bulk updating {len(bulk_data)} stocks in database...")
+            db_start = datetime.now()
             try:
-                self.db_conn.execute("""
-                    INSERT OR IGNORE INTO stock_metadata (symbol, name, exchange, mic)
-                    VALUES (?, ?, ?, ?)
-                """, [stock['symbol'], stock['name'], stock['exchange'], stock['mic']])
+
+                # Build a single multi-row upsert to avoid executing per-record
+                placeholders = ", ".join(["(?, ?, ?, ?, ?, ?, ?, ?)"] * len(bulk_data))
+                params = []
+                for data in bulk_data:
+                    params.extend([
+                        data['symbol'],
+                        data['name'],
+                        data['exchange'],
+                        data['mic'],
+                        data['currency'],
+                        data['type'],
+                        data['shares'],
+                        data['timestamp']
+                    ])
+
+                sql = f"""
+                    INSERT INTO stock_metadata (symbol, name, exchange, mic, currency, type, shares_outstanding, last_updated)
+                    VALUES {placeholders}
+                    ON CONFLICT (symbol, exchange) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        mic = EXCLUDED.mic,
+                        currency = EXCLUDED.currency,
+                        type = EXCLUDED.type,
+                        shares_outstanding = EXCLUDED.shares_outstanding,
+                        last_updated = EXCLUDED.last_updated
+                """
+                self.db_conn.execute(sql, params)
+
+                # # Commit all changes at once
+                # self.db_conn.execute("COMMIT")
+                db_elapsed = (datetime.now() - db_start).total_seconds()
+                logger.info(f"Successfully updated {len(bulk_data)} stocks in database in {db_elapsed:.2f} seconds")
             except Exception as e:
-                logger.error(f"Error updating metadata for {stock['symbol']}: {e}")
-        self.db_conn.execute("COMMIT")
-        logger.info("Stock metadata updated successfully")
+                logger.error(f"Error during bulk update: {e}")
+                raise
+
+        # Final summary
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"Metadata update completed in {elapsed/60:.2f} minutes")
+        logger.info(f"Total: {total_stocks} | Successful: {successful} | Failed: {failed}")
+        logger.info(f"Average rate: {total_stocks/elapsed:.1f} stocks/sec")
+
+    def _get_stocks_metadata(self, exchange: str) -> List[Dict]:
+        """Fetch stock metadata for a specific exchange"""
+        try:
+            result = self.db_conn.execute(
+                "SELECT symbol, name, exchange, mic, currency, type FROM valid_stocks WHERE exchange = ?",
+                [exchange]
+            ).fetchall()
+            stocks = []
+            for row in result:
+                stocks.append({
+                    'symbol': row[0],
+                    'name': row[1],
+                    'exchange': row[2],
+                    'mic': row[3],
+                    'currency': row[4],
+                    'type': row[5]
+                })
+            logger.info(f"Fetched {len(stocks)} stocks from metadata for {exchange}")
+            return stocks
+        except Exception as e:
+            logger.error(f"Error fetching stock metadata for {exchange}: {e}")
+            return []
+
+    def _get_shares_outstanding(self, symbol: str, exchange: str) -> Optional[float]:
+        """Get shares outstanding from stock_metadata table"""
+        try:
+            result = self.db_conn.execute(
+                "SELECT shares_outstanding FROM valid_stocks WHERE symbol = ? AND exchange = ?",
+                [symbol, exchange]
+            ).fetchone()
+            return result[0] if result and result[0] else None
+        except Exception as e:
+            logger.error(f"Error fetching shares for {symbol}: {e}")
+            return None
 
     def _store_price(self, symbol: str, quote: Dict, date: str, exchange: str, mic: str):
         """
@@ -135,31 +292,39 @@ class StockDataIngestion:
             logger.error(f"Error fetching stocks: {e}")
             return []
 
-    def _process_stocks_batch(self, stocks: List[Dict], target_date: str, exchange: str) -> tuple:
+    def _process_stocks_batch(self, stocks: List[Dict], target_date: Optional[str], period: Optional[str] ,exchange: str) -> tuple:
         """
         Process a batch of stocks and return processing statistics.
         Returns: (processed_count, successful_count, failed_count)
         """
         processed = successful = failed = 0
         total_stocks = len(stocks)
+        requested_symbols = [stock['symbol'] for stock in stocks]
 
         for stock in stocks:
             processed += 1
 
-            if self._process_single_stock(stock, target_date, exchange):
-                successful += 1
-            else:
-                failed += 1
+            quotes = self.client.get_batch_quote(requested_symbols, target_date=target_date, period=period)
 
-            # Log progress at 5% intervals
-            if processed * 100 / total_stocks % 5 == 0:
-                logger.info(f"Processed {processed}/{total_stocks} stocks for {exchange}")
+            quotes.to_sql("daily_stock_prices", self.db_conn.conn, if_exists="append", index=False)
+
+            fetched_symbols = set(quotes["symbol"].unique())
+
+            # Compute counts
+            success_count = len(fetched_symbols)
+            failed_symbols = set(requested_symbols) - fetched_symbols
+            failed_count = len(failed_symbols)
+
+            print(f"✅ Successfully fetched: {success_count}")
+            print(f"❌ Failed to fetch: {failed_count}")
+            print(f"Failed symbols: {sorted(failed_symbols)}")
+
 
         return processed, successful, failed
 
     def _process_single_stock(self, stock: Dict, target_date: str, exchange: str) -> bool:
         """
-        Process a single stock: fetch quote and market cap, store data.
+        Process a single stock: fetch quote and calculate market cap using stored shares.
         Returns True if successful, False otherwise.
         """
         symbol = stock.get('symbol')
@@ -172,16 +337,13 @@ class StockDataIngestion:
 
             self._store_price(symbol, quote, target_date, exchange, mic)
 
-            profile = self.client.get_company_profile(symbol)
-            if profile:
-                market_cap = profile.get('market_cap')
-                shares = profile.get('shares_outstanding')
+            # Get shares outstanding from metadata table
+            shares = self._get_shares_outstanding(symbol, exchange)
 
-                if not market_cap and shares:
-                    market_cap = quote.get('close') * shares
-
-                if market_cap:
-                    self._store_market_cap(symbol, market_cap, shares, target_date, exchange, mic)
+            if shares and quote.get('close'):
+                # Calculate market cap: shares * LTP (Last Traded Price)
+                market_cap = shares * quote.get('close')
+                self._store_market_cap(symbol, market_cap, shares, target_date, exchange, mic)
 
             return True
 
@@ -191,43 +353,87 @@ class StockDataIngestion:
 
     # Main Ingestion Logic
 
-    def ingest_daily_snapshot_data(self, exchange: str, target_date: str = None):
-        target_date = target_date or datetime.now().strftime('%Y-%m-%d')
+    def ingest_daily_snapshot_data(self, exchange: str, target_date: str = None, period: str = None):
+
+        if target_date and period:
+            raise ValueError("Specify either target_date or period, not both.")
+        if not target_date:
+            period = period or '1d'
+
         started_at = datetime.now()
-        log_id = None
+        # log_id = None
 
         try:
             logger.info(f"Starting ingestion for {exchange} on {target_date}")
 
             # Create ingestion log entry
-            log_id = self._create_ingestion_log(exchange, target_date, started_at)
+            # log_id = self._create_ingestion_log(exchange, target_date, started_at)
 
             # Get and filter stocks
-            exchange_stocks = self._get_stocks(exchange)
+            exchange_stocks = self._get_stocks_metadata(exchange)
             if not exchange_stocks:
                 return
 
-            # Update stock metadata
-            self._update_stock_metadata(exchange_stocks)
-
-            # Process all stocks
+            # Process all stocks (using stored shares_outstanding from metadata)
             processed, successful, failed = self._process_stocks_batch(
-                exchange_stocks, target_date, exchange
+                exchange_stocks, target_date, period, exchange
             )
 
             # Update log with success
-            self._update_ingestion_log_success(log_id, processed, successful, failed, exchange)
+            # self._update_ingestion_log_success(log_id, processed, successful, failed, exchange)
 
         except Exception as e:
             logger.error(f"Ingestion error for {exchange}: {e}")
-            if log_id:
-                self._update_ingestion_log_failure(log_id, e)
+            # if log_id:
+            #     self._update_ingestion_log_failure(log_id, str(e))
             raise
 
-    def run_daily_snapshot(self, target_date: str = None):
+    def run_stock_metadata_update(self, exchange: str = 'NYSE'):
+        """
+        Update stock metadata including shares outstanding.
+        This should run less frequently (e.g., weekly or monthly) as shares outstanding
+        doesn't change frequently.
+
+        Args:
+            exchange: Specific exchange to update, or None to update all (NYSE, NASDAQ)
+        """
+        logger.info("="*80)
+        logger.info(f"Starting Stock Metadata Update (Provider: {self.data_provider})")
+        logger.info("="*80)
+
+
+        try:
+            logger.info(f"Updating metadata for {exchange}")
+
+            # Get stocks for exchange
+            stocks = self._get_stocks(exchange)
+            if not stocks:
+                logger.warning(f"No stocks found for {exchange}")
+                raise ValueError(f"No stocks found for {exchange}")
+
+            # Update metadata with shares outstanding
+            self._update_stock_metadata(stocks)
+
+            logger.info(f"Metadata update completed for {exchange}")
+
+        except Exception as e:
+            logger.error(f"Error updating metadata for {exchange}: {e}")
+
+        logger.info("="*80)
+        logger.info("Stock Metadata Update Completed")
+        logger.info("="*80)
+
+    def run_daily_snapshot(self, exchange: str = 'NYSE' ,target_date: str = None, period: str = None):
+
         logger.info("="*80)
         logger.info(f"Starting Daily Stock Data Snapshot - NYSE & NASDAQ (Provider: {self.data_provider})")
         logger.info("="*80)
+
+        # Run ingestion for both exchanges
+        try:
+            self.ingest_daily_snapshot_data(exchange, target_date, period)
+        except Exception as e:
+            logger.error(f"Failed to process {exchange}: {e}")
 
         logger.info("=" * 80)
         logger.info("Daily Snapshot Completed")
@@ -253,13 +459,12 @@ class StockDataIngestion:
 
 def main():
     try:
-        # You can now easily switch providers:
-        # ingestion = StockDataIngestion(db_type='duckdb', data_provider='finnhub')
-        # ingestion = StockDataIngestion(db_type='duckdb', data_provider='alphavantage')
-        # ingestion = StockDataIngestion(db_type='sqlite', data_provider='iexcloud')
-
         ingestion = StockDataIngestion('sqlite')  # Uses defaults from env vars
-        ingestion.run_daily_snapshot()
+
+        # ingestion.run_stock_metadata_update()
+
+        ingestion.run_daily_snapshot(period='1d')
+
         ingestion.close()
     except Exception as e:
         logger.error(f"Fatal error: {e}")
@@ -268,5 +473,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
