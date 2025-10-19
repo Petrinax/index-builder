@@ -463,7 +463,7 @@ def main():
 
         # ingestion.run_stock_metadata_update()
 
-        ingestion.run_daily_snapshot(period='1d')
+        ingestion.run_daily_snapshot(period='1mo')
 
         ingestion.close()
     except Exception as e:
