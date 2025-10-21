@@ -1,4 +1,4 @@
-## Future Scopes:
+## Future Scope:
 
 - support multiple custom indices (Equal Weight 100, Equal Weight Tech 50, etc)
 - support different strategies with Other Weighting Methods. (Market Cap Weighted, Equal Share Weighted, etc)
@@ -6,15 +6,15 @@
 
 - Improve change tracking. instead of { date: portfolio }. takes space.
 
-- Use warehouse . not DB.
+- Use Data Warehouse, instead of DB to Scale. 
 
 - Rate Limit web service.
 
-- health check endpoint.
-- add workers for api.
-- Async requests
+- Health check endpoint.
+- Add more workers for api.
+- Async requests (Done)
 
-- Use multi-stage Docker builds for smaller images. (explore
+- Use multi-stage Docker builds for smaller images. (explore)
 
 - Avoid storing large files in DB; use GCS buckets (Data lakes . hudi iceberg etc. ) for reports if needed.
 

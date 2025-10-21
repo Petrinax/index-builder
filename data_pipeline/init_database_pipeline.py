@@ -6,7 +6,7 @@ from typing import List
 from database import DatabaseFactory, DatabaseConnection
 from base_logging import Logger
 
-logger = Logger(__name__)
+logger = Logger("pipeline.init_database")
 
 
 class DatabaseInitPipeline:

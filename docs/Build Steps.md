@@ -1,22 +1,27 @@
 
+# Build Index Logic
+
 input params:
 start, ends
 
-INIT:
+## INIT:
 
-# simulates/marks start of day (start - 1)
-Let the day end ...
-# simulates/marks end of day (start - 1)
 
-1. set NAV = 1000
+    # simulates/marks start of day (start - 1)
+    Let the day end ...
+    # simulates/marks end of day (start - 1)
+    
+**Event** : start-1 day ends
 
-2. fetch top N stocks at EOD (start - 1) [handle error if start - 1 not found]
+    1. set NAV = 1000
+    
+    2. fetch top N stocks at EOD (start - 1) [handle error if start - 1 not found]
 
-3. Distribute shares equally weighted by value. Strategy: (Equal Notional Weighting) # scalable to add strategies later
+    3. Distribute shares equally weighted by value. Strategy: (Equal Notional Weighting) # scalable to add strategies later
 
-4. Maintain share distribution/portfolio till EOD of `start`
+    4. Maintain share distribution/portfolio till EOD of `start`
 
-ITERATE:
+## ITERATE:
 
 iterate through start - end:
 
@@ -24,7 +29,7 @@ iterate through start - end:
     Let the day end ...
     # simulates/marks end of day `day`
 
-    # Event : day ends
+**Event** : day ends
 
     5. Fetch portfolio from (day - 1)
 
@@ -48,6 +53,4 @@ iterate through start - end:
 
     # Log portfolio
     12. { date: portfolio }
-
-
 

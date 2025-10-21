@@ -146,7 +146,7 @@ even though their prices and number of shares differ.
 
 """
 
-Follow Up Questions:
+Follow Up :
 
 What should be the portfolio value? (to determine
 is fractional shareholding possible?
