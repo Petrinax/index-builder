@@ -93,7 +93,7 @@ class StockDataClient(ABC):
         pass
 
     @abstractmethod
-    def get_batch_quote(self, symbols: List[str], target_date, period) -> pd.DataFrame:
+    def get_batch_quote(self, symbols: List[str], target_date, period, load_ts) -> pd.DataFrame:
         pass
 
     def _apply_rate_limit(self):
@@ -191,7 +191,7 @@ class FinnhubClient(StockDataClient):
         except Exception as e:
             logger.warning(f"Error fetching quote for {symbol}: {e}")
             return None
-    def get_batch_quote(self, symbols: List[str], target_date, period) -> pd.DataFrame:
+    def get_batch_quote(self, symbols: List[str], target_date, period, load_ts) -> pd.DataFrame:
         raise NotImplementedError("Batch quote fetching not available for FinnhubClient")
 
     def get_company_profile(self, symbol: str) -> Optional[Dict[str, Any]]:
@@ -301,16 +301,19 @@ class YFinanceClient(StockDataClient):
             logger.warning(f"Error fetching quote for {symbol}: {e}")
             return None
 
-    def get_batch_quote(self, symbols: List[str], target_date, period) -> pd.DataFrame:
+    def get_batch_quote(self, symbols: List[str], target_date: str, period: str, load_ts: datetime) -> pd.DataFrame:
         """
         Fetch batch quotes for multiple symbols in batches of 500.
 
         Args:
             symbols: List of stock symbols to fetch
-            target_date: Target date for the quotes (not used for yfinance, uses latest)
+            target_date: Target date for the quotes (not used for yfinance, defaults to latest)
+            period: Period for historical data.
+                Valid periods: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd
 
         Returns:
             DataFrame with combined results from all batches
+            :param load_ts:
         """
         batch_size = 500
         all_results = []
@@ -359,7 +362,7 @@ class YFinanceClient(StockDataClient):
 
                 flat_df['exchange'] = 'NYSE'
                 flat_df['mic'] = 'XNYS'
-                flat_df['last_updated'] = datetime.now()
+                flat_df['last_updated'] = load_ts
                 flat_df.rename(columns={
                     'Open': 'open',
                     'High': 'high',

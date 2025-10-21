@@ -1,9 +1,9 @@
 # Run daily snapshot every day at 6:00 PM EST (after market close)
 # Format: minute hour day month day_of_week command
-0 18 * * * cd /app && python data_pipeline/ingestion_pipeline.py run_daily_snapshot --exchange NYSE --period 1d >> logs/cron.log 2>&1
+0 18 * * * cd /app && python -m data_pipeline.ingestion_pipeline run_daily_snapshot --exchange NYSE --period 1d >> logs/cron.log 2>&1
 
 # Run weekly snapshot every Sunday at 7:00 PM EST
-0 19 * * 0 cd /app && python data_pipeline/ingestion_pipeline.py run_weekly_snapshot --exchange NYSE >> logs/cron.log 2>&1
+0 19 * * 0 cd /app && python -m data_pipeline.ingestion_pipeline run_weekly_snapshot --exchange NYSE >> logs/cron.log 2>&1
 
 # Add a blank line at the end (required by cron)
 

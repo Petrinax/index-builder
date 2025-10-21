@@ -15,6 +15,7 @@ class Settings:
     # Database configuration
     DB_TYPE: str = os.getenv('DB_TYPE', 'sqlite')
     DB_PATH: str = os.getenv('DB_PATH', str(Path(__file__).parent.parent / 'data' / 'stock_data.db'))
+    DEBUG: bool = os.getenv('DEBUG', 'FALSE').upper() == 'TRUE'
 
     # Index configuration
     DEFAULT_TOP_N: int = 100

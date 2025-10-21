@@ -178,8 +178,8 @@ class IndexBuilderService:
         added_symbols = new_symbols - old_symbols
         removed_symbols = old_symbols - new_symbols
 
-        added_stocks = [s for s in new_portfolio if s['symbol'] in added_symbols]
-        removed_stocks = [s for s in old_portfolio if s['symbol'] in removed_symbols]
+        added_stocks = [s for s in new_portfolio if (s['symbol'], s['exchange']) in added_symbols]
+        removed_stocks = [s for s in old_portfolio if (s['symbol'], s['exchange']) in removed_symbols]
 
         return added_stocks, removed_stocks
 
@@ -295,7 +295,7 @@ class IndexBuilderService:
 
         # Step 2-3: Fetch top N stocks and distribute equally weighted
         portfolio = self._calculate_equal_weights(top_stocks, current_nav)
-        prev_portfolio = portfolio
+        prev_portfolio = portfolio.copy()
 
         # Save initial composition
         self._save_composition(init_date, portfolio, top_n)
@@ -348,7 +348,7 @@ class IndexBuilderService:
                 # Step 12: Save composition
                 self._save_composition(date_str, portfolio, top_n)
 
-                prev_portfolio = portfolio
+                prev_portfolio = portfolio.copy()
                 days_processed += 1
 
             except ValueError as e:
@@ -619,3 +619,16 @@ class IndexBuilderService:
     def clear_cache(self):
         """Clear all cached data"""
         self._cache.clear()
+
+    def reset_database(self):
+        """Reset index-related database tables"""
+        conn = self._get_connection()
+
+        conn.execute("DROP TABLE IF EXISTS index_performance")
+        conn.execute("DROP TABLE IF EXISTS index_composition")
+        conn.execute("DROP TABLE IF EXISTS composition_changes")
+
+        conn.close()
+
+        # Re-initialize tables
+        self._init_index_tables()

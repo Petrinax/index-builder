@@ -21,6 +21,8 @@
 - Prometheus + Grafana (if on GKE) or Cloud Monitoring
 - Monitoring alerts for failures
 
+- Make Connection Objects singleton OR added context manager support to avoid multiple connections being opened.
+
 
 
 

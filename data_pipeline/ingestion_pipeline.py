@@ -27,7 +27,7 @@ EXCHANGE_MIC_CODES = {
 
 
 class StockDataIngestion:
-    def __init__(self, db_type: str = 'sqlite', db_path: str = 'stock_data.db', data_provider: str = None):
+    def __init__(self, db_type: str = 'sqlite', db_path: str = None, data_provider: str = None):
         # Initialize data provider client
         self.data_provider = data_provider or DATA_PROVIDER
         self.client: StockDataClient = ClientFactory.create(self.data_provider)
@@ -37,6 +37,7 @@ class StockDataIngestion:
         self.db_type = db_type or DB_TYPE
         self.db_path = db_path or DB_PATH
         self.db_client: DatabaseConnection = DatabaseFactory.create(self.db_type, self.db_path)
+        self.run_start_ts = self.run_end_ts = None
         logger.info(f"Using {self.db_type.upper()} database: {self.db_path}")
 
 
@@ -294,7 +295,8 @@ class StockDataIngestion:
         total_stocks = len(stocks)
         requested_symbols = stocks['symbol'].to_list()
 
-        quotes = self.client.get_batch_quote(requested_symbols, target_date=target_date, period=period)
+        quotes = self.client.get_batch_quote(requested_symbols[:10], target_date=target_date, period=period,
+                                             load_ts=self.run_start_ts)
 
         # Use upsert approach instead of append to handle conflicts
         if not quotes.empty:
@@ -304,17 +306,9 @@ class StockDataIngestion:
 
             # Perform upsert from temp table to main table
             upsert_sql = f"""
-                INSERT INTO daily_stock_prices (symbol, exchange, mic, open, high, low, close, volume, date, last_updated)
+                INSERT OR REPLACE INTO daily_stock_prices (symbol, exchange, mic, open, high, low, close, volume, date, last_updated)
                 SELECT symbol, exchange, mic, open, high, low, close, volume, date, last_updated
                 FROM {temp_table}
-                ON CONFLICT (symbol, exchange, date) DO UPDATE SET
-                    open = EXCLUDED.open,
-                    high = EXCLUDED.high,
-                    low = EXCLUDED.low,
-                    close = EXCLUDED.close,
-                    volume = EXCLUDED.volume,
-                    mic = EXCLUDED.mic,
-                    last_updated = EXCLUDED.last_updated
             """
             self.db_client.execute(upsert_sql)
             
@@ -416,14 +410,9 @@ class StockDataIngestion:
                 df_market_cap.to_sql(temp_table, self.db_client.conn, if_exists="replace", index=False)
                 
                 upsert_sql = f"""
-                    INSERT INTO daily_market_cap (symbol, exchange, mic, market_cap, shares_outstanding, date, last_updated)
+                    INSERT OR REPLACE INTO daily_market_cap (symbol, exchange, mic, market_cap, shares_outstanding, date, last_updated)
                     SELECT symbol, exchange, mic, market_cap, shares_outstanding, date, last_updated
                     FROM {temp_table}
-                    ON CONFLICT (symbol, exchange, date) DO UPDATE SET
-                        market_cap = EXCLUDED.market_cap,
-                        shares_outstanding = EXCLUDED.shares_outstanding,
-                        mic = EXCLUDED.mic,
-                        last_updated = EXCLUDED.last_updated
                 """
                 self.db_client.execute(upsert_sql)
                 self.db_client.execute(f"DROP TABLE IF EXISTS {temp_table}")
@@ -479,6 +468,7 @@ class StockDataIngestion:
         logger.info("="*80)
         logger.info(f"Starting Daily Stock Data Snapshot - NYSE & NASDAQ (Provider: {self.data_provider})")
         logger.info("="*80)
+        self.run_start_ts = datetime.now()
 
         # Run ingestion for both exchanges
         try:
@@ -489,17 +479,18 @@ class StockDataIngestion:
         logger.info("=" * 80)
         logger.info("Daily Snapshot Completed")
         logger.info("=" * 80)
-        self._print_summary(target_date)
+        self.run_end_ts = datetime.now()
+        logger.info(f"Run Duration: {(self.run_end_ts - self.run_start_ts).total_seconds()} seconds")
+        self._print_summary(self.run_start_ts.strftime("%Y-%m-%d %H:%M:%S.%f"))
 
-    def _print_summary(self, date: str = None):
-        date = date or datetime.now().strftime('%Y-%m-%d')
+    def _print_summary(self, load_ts: str = None):
         try:
             result = self.db_client.execute('''
                 SELECT exchange, COUNT(DISTINCT symbol) as stock_count
-                FROM daily_stock_prices WHERE date = ? GROUP BY exchange ORDER BY exchange
-            ''', [date]).fetchall()
+                FROM daily_stock_prices WHERE last_updated = ? GROUP BY exchange ORDER BY exchange
+            ''', [load_ts]).fetchall()
 
-            logger.info(f"\n{'='*50}\nData Summary for {date}\n{'='*50}")
+            logger.info(f"\n{'='*50}\nData Summary for load time: {load_ts}\n{'='*50}")
             for row in result:
                 logger.info(f"{row[0]}: {row[1]} stocks")
             logger.info("="*50)
@@ -526,7 +517,7 @@ def main():
     snapshot_parser = subparsers.add_parser('run_daily_snapshot', help='Run daily stock data snapshot ingestion')
     snapshot_parser.add_argument('--exchange', type=str, default='NYSE', help='Exchange to process (default: NYSE)')
     snapshot_parser.add_argument('--date', type=str, help='Target date for snapshot (YYYY-MM-DD)')
-    snapshot_parser.add_argument('--period', type=str, help='Period for snapshot (e.g., 1d, 5d)')
+    snapshot_parser.add_argument('--period', type=str, help='Period for snapshot (e.g., 1d, 5d), Valid periods: 1d,5d,1mo,3mo,6mo,1y,ytd')
 
     # Subparser for metadata update
     metadata_parser = subparsers.add_parser('run_stock_metadata_update', help='Update stock metadata including shares outstanding')

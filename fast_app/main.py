@@ -29,7 +29,8 @@ from fast_app.config import settings
 app = FastAPI(
     title="Index Builder API",
     description="API for constructing and querying equal-weighted stock indices",
-    version="1.0.0"
+    version="1.0.0",
+    debug=settings.DEBUG
 )
 
 # Initialize service
@@ -163,8 +164,18 @@ async def clear_cache():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error clearing cache: {str(e)}")
 
+@app.delete("/reset-database")
+async def reset_database():
+    """Reset the database by deleting all index-related data"""
+    try:
+        index_service.reset_database()
+        return {"message": "Database reset successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error resetting database: {str(e)}")
+
+
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=settings.DEBUG)
 
