@@ -1,13 +1,13 @@
 PYTHONPATH=/app
 
-# Test job - verify cron is working (runs every minute)
-* * * * * echo "Cron test at $(date)" >> /app/logs/cron_test.log 2>&1
+# Health Check - verify cron is working (runs every minute)
+# Format: minute hour day month day_of_week command
+* * * * * echo "Cron health check at $(date)" >> /app/logs/cron.log 2>&1
 
 # Run daily snapshot every day at 6:00 PM EST (after market close)
-# Format: minute hour day month day_of_week command
-* * * * * cd /app && /usr/local/bin/python3 -m data_pipeline.ingestion_pipeline run_daily_snapshot --exchange NYSE --period 1d >> /app/logs/daily_snapshot.log 2>&1
+0 18 * * * cd /app && /usr/local/bin/python3 -m data_pipeline.ingestion_pipeline run_daily_snapshot --exchange NYSE --period 1d >> /app/logs/cron.log 2>&1
 
 # Run weekly snapshot every Sunday at 7:00 PM EST
-0 19 * * 0 cd /app && /usr/local/bin/python3 -m data_pipeline.ingestion_pipeline run_weekly_snapshot --exchange NYSE >> /app/logs/weekly_snapshot.log  2>&1
+0 19 * * 0 cd /app && /usr/local/bin/python3 -m data_pipeline.ingestion_pipeline run_weekly_snapshot --exchange NYSE >> /app/logs/cron.log 2>&1
 
 # Add a blank line at the end (required by cron)

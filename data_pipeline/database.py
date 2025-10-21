@@ -6,6 +6,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, List, Tuple
 
+from .base_logging import Logger
+
+logger = Logger("pipeline.database")
+
 
 class DatabaseConnection(ABC):
     """Abstract base class for database connections"""
@@ -94,8 +98,10 @@ class SQLiteConnection(DatabaseConnection):
         self.cursor = None
 
     def connect(self, db_path: str):
+        logger.info("Connecting to SQLite database at %s", db_path)
         self.conn = sqlite3.connect(db_path)
         self.cursor = self.conn.cursor()
+        logger.info("Connected to SQLite database at %s", db_path)
         return self
 
     def execute(self, query: str, params: List = None):

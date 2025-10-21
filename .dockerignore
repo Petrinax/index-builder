@@ -35,6 +35,7 @@ csv_exports/
 !requirements.txt
 
 # Other
+*.env
 .env.example
 finnhub_secret.json
 otherlisted.csv

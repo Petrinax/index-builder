@@ -39,8 +39,6 @@ services:
       - ./logs:/app/logs
       # Mount exports directory
       - ./fast_app/exports:/app/fast_app/exports
-      # Mount env file for configuration
-      - ./.env:/app/.env
     environment:
       - DB_TYPE=${DB_TYPE:-sqlite}
       - DB_PATH=/app/data/stock_data.db
@@ -69,42 +67,38 @@ services:
       - ./data:/app/data
       # Mount logs directory to persist logs
       - ./logs:/app/logs
-      # Mount csv exports directory
-      - ./csv_exports:/app/csv_exports
-      # Mount env file for configuration
-      - ./.env:/app/.env
     environment:
       - DATA_PROVIDER=${DATA_PROVIDER:-yfinance}
       - DB_TYPE=${DB_TYPE:-sqlite}
       - DB_PATH=/app/data/stock_data.db
       - MAX_WORKERS=${MAX_WORKERS:-15}
+      - TZ=America/New_York # Set timezone for cron jobs
     depends_on:
       - sqlite
     networks:
       - stock-data-network
 
   # Optional: One-time runner service for manual execution
-  data-pipeline-manual:
-    build:
-      context: .
-      dockerfile: data_pipeline/Dockerfile
-    container_name: data-pipeline-manual
-    profiles:
-      - manual
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./csv_exports:/app/csv_exports
-      - ./.env:/app/.env
-    environment:
-      - DATA_PROVIDER=${DATA_PROVIDER:-yfinance}
-      - DB_TYPE=${DB_TYPE:-sqlite}
-      - DB_PATH=/app/data/stock_data.db
-      - MAX_WORKERS=${MAX_WORKERS:-15}
-    depends_on:
-      - sqlite
-    networks:
-      - stock-data-network
+#  data-pipeline-manual:
+#    build:
+#      context: .
+#      dockerfile: data_pipeline/Dockerfile
+#    container_name: data-pipeline-manual
+#    profiles:
+#      - manual
+#    volumes:
+#      - ./data:/app/data
+#      - ./logs:/app/logs
+#      - ./csv_exports:/app/csv_exports
+#    environment:
+#      - DATA_PROVIDER=${DATA_PROVIDER:-yfinance}
+#      - DB_TYPE=${DB_TYPE:-sqlite}
+#      - DB_PATH=/app/data/stock_data.db
+#      - MAX_WORKERS=${MAX_WORKERS:-15}
+#    depends_on:
+#      - sqlite
+#    networks:
+#      - stock-data-network
 
 volumes:
   redis_data:
