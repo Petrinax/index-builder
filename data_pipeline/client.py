@@ -17,7 +17,7 @@ import pandas as pd
 from .base_logging import Logger
 
 load_dotenv()
-logger = Logger(__name__)
+logger = Logger("data_pipeline.client")
 
 
 class StockDataClient(ABC):

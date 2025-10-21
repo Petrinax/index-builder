@@ -12,7 +12,7 @@ from .base_logging import Logger
 load_dotenv()
 
 
-logger = Logger(__name__)
+logger = Logger("ingestion_pipeline")
 
 # Configuration
 DATA_PROVIDER = os.getenv('DATA_PROVIDER', 'yfinance')  # Default provider
