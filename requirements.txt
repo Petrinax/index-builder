@@ -4,4 +4,7 @@ duckdb
 python-dotenv
 requests
 yfinance
-
+fastapi
+uvicorn
+pydantic
+openpyxl
