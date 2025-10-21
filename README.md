@@ -6,7 +6,7 @@
 [![Docker](https://img.shields.io/badge/Docker-Supported-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
 [![Redis](https://img.shields.io/badge/Redis-Caching-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
 
-> A comprehensive stock index construction and management system that creates equal-weighted indices from NYSE and NASDAQ stocks with real-time data ingestion, performance tracking, and REST API access.
+> A comprehensive stock index construction and management system that creates equal-weighted indices from NYSE stocks with scheduled daily data ingestion, performance tracking, and REST API access.
 
 ## 📋 Table of Contents
 
