@@ -310,10 +310,10 @@ class YFinanceClient(StockDataClient):
             target_date: Target date for the quotes (not used for yfinance, defaults to latest)
             period: Period for historical data.
                 Valid periods: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd
+            load_ts: Timestamp when the data is loaded.
 
         Returns:
             DataFrame with combined results from all batches
-            :param load_ts:
         """
         batch_size = 500
         all_results = []
@@ -395,8 +395,6 @@ class YFinanceClient(StockDataClient):
         logger.info(f"Total records fetched: {len(combined_df)} across {len(all_results)} batches")
 
         return combined_df
-
-
 
     def get_company_profile(self, symbol: str) -> Optional[Dict[str, Any]]:
         """

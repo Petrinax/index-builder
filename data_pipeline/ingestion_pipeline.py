@@ -43,6 +43,13 @@ class StockDataIngestion:
 
     # DB Tasks
 
+    def close(self):
+        if self.db_client:
+            self.db_client.close()
+            logger.info("Database connection closed")
+
+    # Meta Data Update
+
     def _fetch_and_update_single_stock_metadata(self, stock: Dict) -> Dict[str, any]:
         """
         Fetch company profile and prepare metadata for a single stock.
@@ -191,91 +198,8 @@ class StockDataIngestion:
             logger.error(f"Error fetching stock metadata for {exchange}: {e}")
             raise e
 
-    def _get_shares_outstanding(self, symbol: str, exchange: str) -> Optional[float]:
-        """Get shares outstanding from stock_metadata table"""
-        try:
-            result = self.db_client.execute(
-                "SELECT shares_outstanding FROM valid_stocks WHERE symbol = ? AND exchange = ?",
-                [symbol, exchange]
-            ).fetchone()
-            return result[0] if result and result[0] else None
-        except Exception as e:
-            logger.error(f"Error fetching shares for {symbol}: {e}")
-            return None
 
-    def _store_price(self, symbol: str, quote: Dict, date: str, exchange: str, mic: str):
-        """
-        This statement performs an *upsert* into the `daily_stock_prices` table.
-
-        - Insert a new daily price row, or update the existing row if one already exists for the same `(symbol, date, exchange)` key.
-        - Conflict target: `(symbol, date, exchange)` matches the table`s unique constraint so duplicates trigger the conflict branch.
-        - Update behavior: the `DO UPDATE SET` uses `EXCLUDED.<col>` (the incoming values) to overwrite `open, high, low, close, volume, mic` on the existing row.
-        - Result: ensures a single row per `(symbol, date, exchange)` with the latest price and mic, avoiding duplicate inserts.
-        - Compatibility / notes: this syntax is supported by SQLite (3.24+) and PostgreSQL; ensure the unique constraint or primary key exists for the conflict columns. The `?` placeholders follow the DB-API parameter binding.
-
-        """
-        self.db_client.execute('''
-            INSERT INTO daily_stock_prices (symbol, date, open, high, low, close, volume, exchange, mic)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (symbol, date, exchange) DO UPDATE SET
-                open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
-                close = EXCLUDED.close, volume = EXCLUDED.volume, mic = EXCLUDED.mic
-        ''', [symbol, date, quote.get('open'), quote.get('high'), quote.get('low'),
-              quote.get('close'), quote.get('volume'), exchange, mic])
-
-    def _store_market_cap(self, symbol: str, market_cap: float, shares: float,
-                          date: str, exchange: str, mic: str):
-        """
-        This statement performs an *upsert* into the `daily_market_cap` table.
-        - Insert a new daily market cap row, or update the existing row if one already exists for the same `(symbol, date, exchange)` key.
-        - Conflict target: `(symbol, date, exchange)` matches the table`s unique constraint so duplicates trigger the conflict branch.
-        - Update behavior: the `DO UPDATE SET` uses `EXCLUDED.<col>` (the incoming values) to overwrite `market_cap, shares_outstanding, mic` on the existing row.
-        - Result: ensures a single row per `(symbol, date, exchange)` with the latest market cap data, avoiding duplicate inserts.
-
-        - Compatibility / notes: this syntax is supported by SQLite (3.24+) and PostgreSQL; ensure the unique constraint or primary key exists for the conflict columns. The `?` placeholders follow the DB-API parameter binding.
-
-        """
-        self.db_client.execute('''
-            INSERT INTO daily_market_cap (symbol, date, market_cap, shares_outstanding, exchange, mic)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT (symbol, date, exchange) DO UPDATE SET
-                market_cap = EXCLUDED.market_cap, shares_outstanding = EXCLUDED.shares_outstanding, mic = EXCLUDED.mic
-        ''', [symbol, date, market_cap, shares, exchange, mic])
-
-    def close(self):
-        if self.db_client:
-            self.db_client.close()
-            logger.info("Database connection closed")
-
-
-    # Ingestion Logs
-
-    def _create_ingestion_log(self, exchange: str, target_date: str, started_at: datetime) -> int:
-        """Create a new ingestion log entry and return its ID."""
-        self.db_client.execute(
-            "INSERT INTO ingestion_log (exchange, date, started_at, status) VALUES (?, ?, ?, 'RUNNING')",
-            [exchange, target_date, started_at]
-        )
-        return self.db_client.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-    def _update_ingestion_log_success(self, log_id: int, processed: int,
-                                      successful: int, failed: int, exchange: str):
-        """Update ingestion log with success status."""
-        self.db_client.execute('''
-            UPDATE ingestion_log SET stocks_processed = ?, stocks_successful = ?, 
-            stocks_failed = ?, completed_at = ?, status = 'COMPLETED' WHERE id = ?
-        ''', [processed, successful, failed, datetime.now(), log_id])
-
-        logger.info(f"{exchange} completed: {successful}/{processed} successful")
-
-    def _update_ingestion_log_failure(self, log_id: int, error_message: str):
-        """Update ingestion log with failure status."""
-        self.db_client.execute(
-            "UPDATE ingestion_log SET status = 'FAILED', completed_at = ?, error_message = ? WHERE id = ?",
-            [datetime.now(), str(error_message), log_id]
-        )
-
-    # Stock Data Fetching
+    # Stock Data Update
 
     def _get_stocks(self, exchange: str) -> List[Dict]:
         try:
@@ -330,35 +254,6 @@ class StockDataIngestion:
             logger.info(f"Failed symbols: {sorted(failed_symbols)}")
 
         return processed, successful, failed, quotes
-
-    def _process_single_stock(self, stock: Dict, target_date: str, exchange: str) -> bool:
-        """
-        Process a single stock: fetch quote and calculate market cap using stored shares.
-        Returns True if successful, False otherwise.
-        """
-        symbol = stock.get('symbol')
-        mic = stock.get('mic', '')
-
-        try:
-            quote = self.client.get_quote(symbol)
-            if not quote or quote.get('close') == 0:
-                return False
-
-            self._store_price(symbol, quote, target_date, exchange, mic)
-
-            # Get shares outstanding from metadata table
-            shares = self._get_shares_outstanding(symbol, exchange)
-
-            if shares and quote.get('close'):
-                # Calculate market cap: shares * LTP (Last Traded Price)
-                market_cap = shares * quote.get('close')
-                self._store_market_cap(symbol, market_cap, shares, target_date, exchange, mic)
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error processing {symbol}: {e}")
-            return False
 
     # Main Ingestion Logic
 
