@@ -24,6 +24,11 @@ class Settings:
     # Cache configuration
     CACHE_ENABLED: bool = True
 
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    REDIS_TTL: int = int(os.getenv("REDIS_TTL", "600"))  # 10 minutes default
+
     # Export configuration
     EXPORT_DIR: str = os.getenv('EXPORT_DIR', str(Path(__file__).parent / 'exports'))
 

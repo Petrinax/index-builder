@@ -295,7 +295,7 @@ class StockDataIngestion:
         total_stocks = len(stocks)
         requested_symbols = stocks['symbol'].to_list()
 
-        quotes = self.client.get_batch_quote(requested_symbols[:10], target_date=target_date, period=period,
+        quotes = self.client.get_batch_quote(requested_symbols, target_date=target_date, period=period,
                                              load_ts=self.run_start_ts)
 
         # Use upsert approach instead of append to handle conflicts

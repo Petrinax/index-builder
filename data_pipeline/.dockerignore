@@ -1,0 +1,41 @@
+# Virtual environments
+index-builder-venv/
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Logs and data (will be mounted as volumes)
+logs/
+data/
+csv_exports/
+
+# Documentation
+*.md
+!README.md
+*.txt
+!requirements.txt
+
+# Other
+.env.example
+finnhub_secret.json
+otherlisted.csv

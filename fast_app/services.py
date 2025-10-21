@@ -20,6 +20,7 @@ from fast_app.models import (
     StockComposition,
     CompositionChange,
 )
+from fast_app.cache import RedisCache
 
 
 class IndexBuilderService:
@@ -28,7 +29,8 @@ class IndexBuilderService:
     def __init__(self, db_type: str = 'sqlite', db_path: str = None):
         self.db_type = db_type
         self.db_path = db_path or 'data/stock_data.db'
-        self._cache = {}
+
+        self._cache = RedisCache()
 
         # Create tables for storing index data
         self._init_index_tables()
@@ -372,10 +374,13 @@ class IndexBuilderService:
 
     async def get_performance(self, start_date: str, end_date: Optional[str]) -> IndexPerformanceResponse:
         """Get performance data for date range (cached)"""
+        if not end_date:
+            end_date = datetime.now().strftime("%Y-%m-%d")
         cache_key = f"perf_{start_date}_{end_date}"
 
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        cached = self._cache.get(cache_key)
+        if cached:
+            return IndexPerformanceResponse(**cached)
 
         conn = self._get_connection()
 
@@ -426,15 +431,16 @@ class IndexBuilderService:
             summary=summary
         )
 
-        self._cache[cache_key] = response
+        self._cache.set(cache_key, response.dict())
         return response
 
     async def get_composition(self, date: str) -> IndexCompositionResponse:
         """Get index composition for a specific date (cached)"""
         cache_key = f"comp_{date}"
 
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        cached = self._cache.get(cache_key)
+        if cached:
+            return IndexCompositionResponse(**cached)
 
         conn = self._get_connection()
 
@@ -472,15 +478,18 @@ class IndexBuilderService:
             total_market_cap=total_market_cap
         )
 
-        self._cache[cache_key] = response
+        self._cache.set(cache_key, response.dict())
         return response
 
     async def get_composition_changes(self, start_date: str, end_date: Optional[str]) -> CompositionChangesResponse:
         """Get composition changes for date range (cached)"""
+        if not end_date:
+            end_date = datetime.now().strftime("%Y-%m-%d")
         cache_key = f"changes_{start_date}_{end_date}"
 
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        cached = self._cache.get(cache_key)
+        if cached:
+            return CompositionChangesResponse(**cached)
 
         conn = self._get_connection()
 
@@ -537,7 +546,7 @@ class IndexBuilderService:
             total_change_days=len(changes)
         )
 
-        self._cache[cache_key] = response
+        self._cache.set(cache_key, response.dict())
         return response
 
     async def export_to_excel(self, start_date: str, end_date: Optional[str]) -> str:
@@ -618,7 +627,7 @@ class IndexBuilderService:
 
     def clear_cache(self):
         """Clear all cached data"""
-        self._cache.clear()
+        self._cache.clear_all()
 
     def reset_database(self):
         """Reset index-related database tables"""
