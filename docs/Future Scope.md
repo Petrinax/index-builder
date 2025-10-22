@@ -1,11 +1,13 @@
 ## Future Scope:
 
+### Functional:
 - support multiple custom indices (Equal Weight 100, Equal Weight Tech 50, etc)
 - support different strategies with Other Weighting Methods. (Market Cap Weighted, Equal Share Weighted, etc)
 - support multiple data providers
 
 - Improve change tracking. instead of { date: portfolio }. takes space.
 
+### Techincal:
 - Use Data Warehouse, instead of DB to Scale. 
 
 - Rate Limit web service.
