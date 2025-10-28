@@ -6,7 +6,20 @@
 [![Docker](https://img.shields.io/badge/Docker-Supported-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
 [![Redis](https://img.shields.io/badge/Redis-Caching-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
 
+<!-- Switch Badges
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%2B-blue?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+"/></a>
+    <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License"/></a>
+  <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"/></a>
+  <a href="https://pandas.pydata.org/"><img src="https://img.shields.io/badge/Pandas-2.2%2B-2C2D72?style=flat-square&logo=pandas&logoColor=white" alt="pandas"/></a>
+  <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker-Supported-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker"/></a>
+    <a href="https://redis.io/"><img src="https://img.shields.io/badge/Redis-Caching-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Docker"/></a>
+</p>
+-->
+
 > A comprehensive stock index construction and management system that creates equal-weighted indices from NYSE stocks with scheduled daily data ingestion, performance tracking, and REST API access.
+
+
 
 ## 📋 Table of Contents
 
@@ -331,3 +344,18 @@ index-builder/
     <a href="https://github.com/petrinax/index-builder/discussions">💬 Discuss</a>
   </p>
 </div>
+
+<p align="center">
+<a href="https://www.linkedin.com/in/piyush-upreti/">
+  <img src="https://custom-icon-badges.demolab.com/badge/LinkedIn-blue?style=for-the-badge&logo=linkedin-white" alt="LinkedIn"/>
+</a>
+<a href="https://github.com/petrinax">
+  <img src="https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub"/>
+</a>
+<a href="https://medium.com/@piyushupreti07">
+  <img src="https://img.shields.io/badge/Medium-wheat?style=for-the-badge&logo=medium&logoColor=black" alt="Medium"/>
+</a>
+<a href="https://mail.google.com/mail/?view=cm&fs=1&to=piyushupreti07@gmail.com">
+  <img src="https://img.shields.io/badge/Gmail-D14836?style=for-the-badge&logo=gmail&logoColor=white" alt="Gmail"/>
+</a>
+</p>
